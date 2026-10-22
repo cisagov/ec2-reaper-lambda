@@ -4,13 +4,27 @@
 [![License](https://img.shields.io/github/license/cisagov/ec2-reaper-lambda)](https://spdx.org/licenses/)
 [![CodeQL](https://github.com/cisagov/ec2-reaper-lambda/workflows/CodeQL/badge.svg)](https://github.com/cisagov/ec2-reaper-lambda/actions/workflows/codeql-analysis.yml)
 
-This is a generic skeleton project that can be used to quickly get a
-new [cisagov](https://github.com/cisagov) GitHub
-[AWS Lambda](https://aws.amazon.com/lambda/) project using the Python runtimes
-started. This skeleton project contains [licensing information](LICENSE), as
-well as [pre-commit hooks](https://pre-commit.com) and
-[GitHub Actions](https://github.com/features/actions) configurations
-appropriate for the major languages that we use.
+This repository contains the code for an AWS Lambda function that
+terminates EC2 instances, in every enabled region of the account where
+it is deployed, that have existed longer than a maximum age.  When any
+instances are terminated, skipped, or an error occurs, a plain-text
+summary is published to an SNS topic.
+
+An instance's age is measured from the time its root EBS volume was
+attached, since that time does not change when an instance is stopped
+and started.  If an instance has no EBS root volume, its launch time is
+used instead.  Instances with termination protection enabled are never
+terminated; they are listed in every summary until they are dealt with.
+
+The summary includes the following details for each instance:
+
+- Instance ARN, `Name` tag, region, and availability zone
+- VPC ID and subnet ID
+- Root volume attach time (with age) and most recent launch time
+- Instance state prior to termination and the state transition reason
+- Instance type, AMI ID, and the key pair assigned at launch
+- Public IP address (if any) and private IP address
+- IAM instance profile, security groups, and tags
 
 ## Building the base Lambda image ##
 
@@ -73,12 +87,54 @@ cd build
 pipenv lock
 ```
 
-## New Repositories from a Skeleton ##
+## Lambda inputs ##
 
-Please see our [Project Setup guide](https://github.com/cisagov/development-guide/tree/develop/project_setup)
-for step-by-step instructions on how to start a new repository from
-a skeleton. This will save you time and effort when configuring a
-new repository!
+| Name | Description | Type | Default | Required |
+| ---- | ----------- | ---- | ------- | :------: |
+| dry\_run | Whether to report the instances that would be terminated without terminating them.  A dry run still publishes a summary and uses the `DryRun` option of the EC2 `TerminateInstances` API to verify that each termination would be permitted. | `bool` | `false` | no |
+| max\_age\_hours | A strictly positive integer denoting the number of hours after which an instance is terminated. | `number` | `24` | no |
+| sns\_topic\_arn | The ARN of the SNS topic to which summaries are published. | `string` | n/a | yes |
+| task | The task to perform.  Must be `reap`. | `string` | n/a | yes |
+| terminate\_stopped | Whether to also terminate stopped (and stopping) instances.  By default only running instances are terminated. | `bool` | `false` | no |
+
+## Example Lambda input ##
+
+The following is an example of the JSON input event that is expected by the
+Lambda:
+
+```json
+{
+    "dry_run": false,
+    "max_age_hours": 24,
+    "sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:ec2-reaper",
+    "task": "reap",
+    "terminate_stopped": true
+}
+```
+
+## Required permissions ##
+
+The Lambda's execution role requires the following permissions:
+
+- `ec2:DescribeInstanceAttribute`
+- `ec2:DescribeInstances`
+- `ec2:DescribeRegions`
+- `ec2:TerminateInstances`
+- `sns:Publish` on the SNS topic
+
+The `ec2:TerminateInstances` permission can be scoped (for example, by
+resource tag) to limit which instances may be terminated.  Any instance
+that the Lambda is not permitted to terminate is reported as an error
+in the summary.
+
+## Running the tests ##
+
+The tests use [moto](https://github.com/getmoto/moto) to mock AWS, so no
+AWS credentials are needed:
+
+```console
+pytest
+```
 
 ## Contributing ##
 
