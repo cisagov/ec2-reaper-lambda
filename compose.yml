@@ -4,7 +4,7 @@ services:
     build: .
     # This uses the value of the LAMBDA_TAG environment variable from
     # the invoking environment but falls back to a default value.
-    image: cisagov/example_lambda:${LAMBDA_TAG:-latest}
+    image: cisagov/ec2_reaper_lambda:${LAMBDA_TAG:-latest}
     entrypoint: /opt/build_artifact.sh
     environment:
       # This uses the value of the BUILD_FILE_NAME environment variable
@@ -17,6 +17,6 @@ services:
     build: .
     # This uses the value of the LAMBDA_TAG environment variable from
     # the invoking environment but falls back to a default value.
-    image: cisagov/example_lambda:${LAMBDA_TAG:-latest}
+    image: cisagov/ec2_reaper_lambda:${LAMBDA_TAG:-latest}
     ports:
       - 9000:8080

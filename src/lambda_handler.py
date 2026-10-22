@@ -1,17 +1,10 @@
-"""Simple AWS Lambda handler to verify functionality."""
+"""AWS Lambda handler to terminate EC2 instances that have existed too long."""
 
 # Standard Python Libraries
 from datetime import datetime, timezone
 import logging
 import os
 from typing import Any
-
-# Third-Party Libraries
-import cowsay
-import cowsay.characters
-
-# cisagov Libraries
-from example import example_div
 
 default_log_level = "INFO"
 logger = logging.getLogger()
@@ -32,53 +25,6 @@ def task_default(event):
     task = event.get("task", None)
     logging.error(error_msg, task)
     failed_task(result, error_msg % task)
-
-    return result
-
-
-def task_cowsay(event) -> dict[str, str | None | bool]:
-    """Generate an output message using the provided information."""
-    result: dict[str, str | None | bool] = {"message": None, "success": True}
-
-    character: str = event.get("character", "tux")
-    if character not in cowsay.characters.CHARS.keys():
-        error_msg = 'Character "%s" is not valid.'
-        logging.error(error_msg, character)
-        failed_task(result, error_msg % character)
-    else:
-        contents: str = event.get("contents", "Hello from AWS Lambda!")
-        logger.info(
-            'Creating output using "%s" with contents "%s"', character, contents
-        )
-        result["message"] = cowsay.get_output_string(character, contents)
-
-    return result
-
-
-def task_divide(event) -> dict[str, float | None | bool]:
-    """Divide one number by another and provide the result."""
-    result: dict[str, float | None | bool] = {"result": None, "success": True}
-    numerator: str = event.get("numerator", None)
-    denominator: str = event.get("denominator", None)
-
-    if denominator is None or numerator is None:
-        error_msg = "Request must include both a numerator and a denominator."
-        logging.error(error_msg)
-        failed_task(result, error_msg)
-    else:
-        try:
-            variable_error_msg = "numerator: %s, denominator: %s"
-            result["result"] = example_div(int(numerator), int(denominator))
-        except ValueError:
-            error_msg = "The provided values must be integers."
-            logging.error(error_msg)
-            logging.error(variable_error_msg, numerator, denominator)
-            failed_task(result, error_msg)
-        except ZeroDivisionError:
-            error_msg = "The denominator cannot be zero."
-            logging.error(error_msg)
-            logging.error(variable_error_msg, numerator, denominator)
-            failed_task(result, error_msg)
 
     return result
 
