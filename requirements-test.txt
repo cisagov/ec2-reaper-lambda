@@ -1,3 +1,6 @@
 --requirement requirements.txt
+# boto3 is provided by the Lambda runtime, but the tests need it locally.
+boto3
+moto[ec2,sns,sts]
 pre-commit
 pytest
