@@ -40,6 +40,10 @@ SUMMARY_OMITTED_NOTE = (
 SUMMARY_SECTION_SEPARATOR = "\n\n"
 
 
+class InvalidEventError(ValueError):
+    """Raised when the event does not describe a valid task."""
+
+
 class ReapError(Exception):
     """Raised when a reaping run finishes with errors."""
 
@@ -106,20 +110,9 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def failed_task(result: dict[str, Any], error_msg: str) -> None:
-    """Update a given result because of a failure during processing."""
-    result["success"] = False
-    result["error_message"] = error_msg
-
-
 def task_default(event):
-    """Provide a result if no valid task was provided."""
-    result = {}
-    error_msg = 'Provided task "%s" is not supported.'
-    task = event.get("task")
-    logging.error(error_msg, task)
-    failed_task(result, error_msg % task)
-    return result
+    """Raise an error because no valid task was provided."""
+    raise InvalidEventError(f'Provided task "{event.get("task")}" is not supported.')
 
 
 def validate_event_data(event: dict[str, Any]) -> EventValidation:
@@ -485,10 +478,7 @@ def task_reap(event):
 
     event_validation: EventValidation = validate_event_data(event)
     if not event_validation.valid:
-        for e in event_validation.errors:
-            logging.error(e)
-        failed_task(result, " ".join(event_validation.errors))
-        return result
+        raise InvalidEventError(" ".join(event_validation.errors))
     validated_event = event_validation.event
 
     dry_run: bool = validated_event["dry_run"]

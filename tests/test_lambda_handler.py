@@ -109,9 +109,9 @@ def test_invalid_event(event, message):
         "task": "reap",
         **event,
     }
-    result = lambda_handler.handler(full_event, None)
-    assert result["success"] is False
-    assert message in result["error_message"]
+    with pytest.raises(lambda_handler.InvalidEventError) as excinfo:
+        lambda_handler.handler(full_event, None)
+    assert message in str(excinfo.value)
 
 
 def test_defaults():
@@ -140,8 +140,8 @@ def test_whole_number_max_age(value):
 
 def test_unsupported_task():
     """Verify that an unknown task fails."""
-    result = lambda_handler.handler({"task": "nope"}, None)
-    assert result["success"] is False
+    with pytest.raises(lambda_handler.InvalidEventError, match="not supported"):
+        lambda_handler.handler({"task": "nope"}, None)
 
 
 def test_nothing_to_reap(monkeypatch, topic_arn):
