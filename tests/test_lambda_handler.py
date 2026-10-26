@@ -95,6 +95,8 @@ def reap(topic_arn, **kwargs):
         ),
         ({"max_age_hours": 0}, "strictly positive"),
         ({"max_age_hours": "abc"}, "must be an integer"),
+        ({"max_age_hours": 24.9}, "must be an integer"),
+        ({"max_age_hours": "24.9"}, "must be an integer"),
         ({"max_age_hours": True}, "strictly positive"),
         ({"dry_run": "false"}, '"dry_run" must be a boolean'),
         ({"terminate_stopped": 1}, '"terminate_stopped" must be a boolean'),
@@ -121,6 +123,19 @@ def test_defaults():
     assert validation.event["dry_run"] is False
     assert validation.event["max_age_hours"] == 24
     assert validation.event["terminate_stopped"] is False
+
+
+@pytest.mark.parametrize("value", [48, 48.0, "48"])
+def test_whole_number_max_age(value):
+    """Verify that whole-number forms of max_age_hours are accepted."""
+    validation = lambda_handler.validate_event_data(
+        {
+            "max_age_hours": value,
+            "sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:t",
+        }
+    )
+    assert validation.valid
+    assert validation.event["max_age_hours"] == 48
 
 
 def test_unsupported_task():

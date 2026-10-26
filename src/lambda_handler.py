@@ -124,6 +124,9 @@ def validate_event_data(event: dict[str, Any]) -> EventValidation:
     # bool is a subclass of int, so it must be rejected explicitly.
     if isinstance(max_age_hours, bool):
         errors.append('"max_age_hours" must be a strictly positive integer.')
+    # int() would truncate, terminating instances earlier than requested.
+    elif isinstance(max_age_hours, float) and not max_age_hours.is_integer():
+        errors.append('"max_age_hours" must be an integer.')
     else:
         try:
             validated["max_age_hours"] = int(max_age_hours)
