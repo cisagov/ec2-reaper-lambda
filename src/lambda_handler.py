@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import logging
 import os
+import re
 from typing import Any, NamedTuple
 
 # Third-Party Libraries
@@ -18,6 +19,10 @@ logger.setLevel(default_log_level)
 DEFAULT_MAX_AGE_HOURS = 24
 # SNS rejects subjects longer than this.
 SNS_SUBJECT_MAX_LENGTH = 100
+SNS_TOPIC_ARN_PATTERN = re.compile(
+    r"^arn:(?P<partition>aws[a-z-]*):sns:(?P<region>[a-z]{2}-[a-z-]+-\d+)"
+    r":(?P<account>\d{12}):(?P<topic>[A-Za-z0-9_-]{1,256}(\.fifo)?)$"
+)
 
 PROTECTED_SKIP_REASON = (
     "Termination protection (disableApiTermination) is enabled for this "
@@ -107,8 +112,13 @@ def validate_event_data(event: dict[str, Any]) -> EventValidation:
     sns_topic_arn = event.get("sns_topic_arn")
     if not sns_topic_arn:
         errors.append('Missing required key "sns_topic_arn" in event.')
-    elif not isinstance(sns_topic_arn, str) or not sns_topic_arn.startswith("arn:"):
-        errors.append('"sns_topic_arn" must be an SNS topic ARN.')
+    elif not isinstance(sns_topic_arn, str) or not SNS_TOPIC_ARN_PATTERN.match(
+        sns_topic_arn
+    ):
+        errors.append(
+            '"sns_topic_arn" must be an SNS topic ARN (e.g. '
+            "arn:aws:sns:us-east-1:123456789012:my-topic)."
+        )
 
     max_age_hours = event.get("max_age_hours", DEFAULT_MAX_AGE_HOURS)
     # bool is a subclass of int, so it must be rejected explicitly.

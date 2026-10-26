@@ -80,6 +80,19 @@ def reap(topic_arn, **kwargs):
     [
         ({"sns_topic_arn": None}, 'Missing required key "sns_topic_arn"'),
         ({"sns_topic_arn": "not-an-arn"}, "must be an SNS topic ARN"),
+        ({"sns_topic_arn": "arn:"}, "must be an SNS topic ARN"),
+        (
+            {"sns_topic_arn": "arn:aws:sqs:us-east-1:123456789012:queue"},
+            "must be an SNS topic ARN",
+        ),
+        (
+            {"sns_topic_arn": "arn:aws:sns:us-east-1:1234:topic"},
+            "must be an SNS topic ARN",
+        ),
+        (
+            {"sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:"},
+            "must be an SNS topic ARN",
+        ),
         ({"max_age_hours": 0}, "strictly positive"),
         ({"max_age_hours": "abc"}, "must be an integer"),
         ({"max_age_hours": True}, "strictly positive"),
@@ -272,3 +285,16 @@ def test_created_time_without_ebs_root():
     launch_time = datetime(2026, 1, 5, tzinfo=timezone.utc)
     instance = {"BlockDeviceMappings": [], "LaunchTime": launch_time}
     assert lambda_handler.get_created_time(instance) == (launch_time, False)
+
+
+@pytest.mark.parametrize(
+    "arn",
+    [
+        "arn:aws:sns:us-east-1:123456789012:ec2-reaper",
+        "arn:aws-us-gov:sns:us-gov-west-1:123456789012:ec2_reaper",
+        "arn:aws:sns:us-east-1:123456789012:ec2-reaper.fifo",
+    ],
+)
+def test_valid_sns_topic_arn(arn):
+    """Verify that well-formed SNS topic ARNs are accepted."""
+    assert lambda_handler.validate_event_data({"sns_topic_arn": arn}).valid
