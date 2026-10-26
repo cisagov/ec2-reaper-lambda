@@ -40,6 +40,10 @@ SUMMARY_OMITTED_NOTE = (
 SUMMARY_SECTION_SEPARATOR = "\n\n"
 
 
+class ReapError(Exception):
+    """Raised when a reaping run finishes with errors."""
+
+
 class EventValidation(NamedTuple):
     """Named tuple to hold event validation information."""
 
@@ -538,14 +542,15 @@ def task_reap(event):
         logging.info("No instances needed to be reaped.")
 
     if results.errors:
-        failed_task(result, " ".join(results.errors))
-    else:
-        result["message"] = (
-            f"{'Dry run: would terminate' if dry_run else 'Terminated'} "
-            f"{len(results.terminated)} instance(s) and skipped "
-            f"{len(results.skipped)} protected instance(s)."
-        )
-        logging.info(result["message"])
+        # Raising makes the invocation count as a Lambda error.
+        raise ReapError(" ".join(results.errors))
+
+    result["message"] = (
+        f"{'Dry run: would terminate' if dry_run else 'Terminated'} "
+        f"{len(results.terminated)} instance(s) and skipped "
+        f"{len(results.skipped)} protected instance(s)."
+    )
+    logging.info(result["message"])
     return result
 
 

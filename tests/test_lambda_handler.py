@@ -262,10 +262,9 @@ def test_termination_error_is_reported(monkeypatch, topic_arn):
         )
 
     monkeypatch.setattr(lambda_handler, "terminate_instance", deny)
-    result = reap(topic_arn)
+    with pytest.raises(lambda_handler.ReapError, match="UnauthorizedOperation"):
+        reap(topic_arn)
 
-    assert result["success"] is False
-    assert "UnauthorizedOperation" in result["error_message"]
     [(subject, body)] = sent_messages(topic_arn)
     assert "errors 1" in subject
     assert "Unable to terminate instance" in body
@@ -275,9 +274,8 @@ def test_publish_failure(monkeypatch, aws):
     """Verify that a failure to publish the summary fails the run."""
     launch()
     advance_clock(monkeypatch, 25)
-    result = reap(f"arn:aws:sns:{REGION}:{DEFAULT_ACCOUNT_ID}:missing")
-    assert result["success"] is False
-    assert "Unable to publish summary" in result["error_message"]
+    with pytest.raises(lambda_handler.ReapError, match="Unable to publish summary"):
+        reap(f"arn:aws:sns:{REGION}:{DEFAULT_ACCOUNT_ID}:missing")
 
 
 def test_oversized_summary(monkeypatch, topic_arn, caplog):

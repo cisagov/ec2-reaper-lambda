@@ -30,6 +30,13 @@ If a summary is larger than the 256 KiB SNS message size limit, items
 at the end of it are omitted and a note says how many were left out.
 The full summary is always written to the Lambda's CloudWatch logs.
 
+If any errors occur, the invocation fails with a `ReapError` after the
+summary is published, so that Lambda error metrics and alarms register
+it.  Lambda retries a failed asynchronous invocation, such as one from
+an EventBridge schedule, twice by default, and each retry publishes
+another summary.  Set the function's maximum retry attempts to zero to
+avoid this.
+
 ## Building the base Lambda image ##
 
 The base Lambda image can be built with the following command:
