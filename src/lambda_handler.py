@@ -110,15 +110,21 @@ def validate_event_data(event: dict[str, Any]) -> EventValidation:
     validated: dict[str, Any] = dict(event)
 
     sns_topic_arn = event.get("sns_topic_arn")
+    topic_match = (
+        SNS_TOPIC_ARN_PATTERN.match(sns_topic_arn)
+        if isinstance(sns_topic_arn, str)
+        else None
+    )
     if not sns_topic_arn:
         errors.append('Missing required key "sns_topic_arn" in event.')
-    elif not isinstance(sns_topic_arn, str) or not SNS_TOPIC_ARN_PATTERN.match(
-        sns_topic_arn
-    ):
+    elif topic_match is None:
         errors.append(
             '"sns_topic_arn" must be an SNS topic ARN (e.g. '
             "arn:aws:sns:us-east-1:123456789012:my-topic)."
         )
+    else:
+        # The topic need not be in the same region as the Lambda.
+        validated["sns_topic_region"] = topic_match["region"]
 
     max_age_hours = event.get("max_age_hours", DEFAULT_MAX_AGE_HOURS)
     # bool is a subclass of int, so it must be rejected explicitly.
@@ -416,6 +422,7 @@ def task_reap(event):
     dry_run: bool = validated_event["dry_run"]
     max_age_hours: int = validated_event["max_age_hours"]
     sns_topic_arn: str = validated_event["sns_topic_arn"]
+    sns_topic_region: str = validated_event["sns_topic_region"]
     states = ["running"]
     if validated_event["terminate_stopped"]:
         states.extend(["stopping", "stopped"])
@@ -449,7 +456,7 @@ def task_reap(event):
             results, account_id, now, max_age_hours, states, dry_run
         )
         try:
-            session.client("sns").publish(
+            session.client("sns", region_name=sns_topic_region).publish(
                 Message=body, Subject=subject, TopicArn=sns_topic_arn
             )
         except (BotoCoreError, ClientError) as err:

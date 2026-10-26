@@ -36,9 +36,9 @@ def topic_arn(aws):
     ]
 
 
-def sent_messages(topic_arn):
+def sent_messages(topic_arn, region=REGION):
     """Return the (subject, message) pairs published to the topic."""
-    topic = sns_backends[DEFAULT_ACCOUNT_ID][REGION].topics[topic_arn]
+    topic = sns_backends[DEFAULT_ACCOUNT_ID][region].topics[topic_arn]
     return [
         (subject, message) for _, message, subject, _, _ in topic.sent_notifications
     ]
@@ -278,6 +278,19 @@ def test_publish_failure(monkeypatch, aws):
     result = reap(f"arn:aws:sns:{REGION}:{DEFAULT_ACCOUNT_ID}:missing")
     assert result["success"] is False
     assert "Unable to publish summary" in result["error_message"]
+
+
+def test_publishes_in_topic_region(monkeypatch, aws):
+    """Verify that the summary is published in the topic's region."""
+    topic_region = "us-west-2"
+    topic_arn = boto3.client("sns", region_name=topic_region).create_topic(
+        Name="reaper"
+    )["TopicArn"]
+    launch()
+    advance_clock(monkeypatch, 25)
+    result = reap(topic_arn)
+    assert result["success"] is True
+    assert len(sent_messages(topic_arn, topic_region)) == 1
 
 
 def test_created_time_prefers_root_volume():
