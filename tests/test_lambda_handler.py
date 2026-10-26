@@ -280,6 +280,47 @@ def test_publish_failure(monkeypatch, aws):
     assert "Unable to publish summary" in result["error_message"]
 
 
+def test_oversized_summary(monkeypatch, topic_arn, caplog):
+    """Verify that an oversized summary is truncated but logged in full."""
+    max_bytes = 2000
+    for _ in range(3):
+        launch()
+    advance_clock(monkeypatch, 25)
+    monkeypatch.setattr(lambda_handler, "SNS_MESSAGE_MAX_BYTES", max_bytes)
+    result = reap(topic_arn)
+
+    assert result["success"] is True
+    assert len(result["terminated"]) == 3
+    [(_, body)] = sent_messages(topic_arn)
+    assert len(body.encode()) <= max_bytes
+    assert body.count("Instance ARN:") < 3
+    assert "more item(s) omitted" in body
+    assert caplog.text.count("Instance ARN:") == 3
+
+
+def test_summary_body_omits_trailing_items():
+    """Verify that items are omitted from the end of an oversized summary."""
+    # Multibyte characters ensure that the limit is applied to bytes.
+    items = [f"item {i} " + "é" * 100 for i in range(10)]
+    summary = lambda_handler.Summary(
+        subject="subject",
+        header=["header"],
+        groups=[("===== A =====", items[:5]), ("===== B =====", items[5:])],
+    )
+    full_body = lambda_handler.summary_body(summary)
+    assert all(item in full_body for item in items)
+    assert lambda_handler.summary_body(summary, len(full_body.encode())) == full_body
+
+    max_bytes = 1000
+    body = lambda_handler.summary_body(summary, max_bytes)
+    shown = [item for item in items if item in body]
+    assert len(body.encode()) <= max_bytes
+    assert 0 < len(shown) < len(items)
+    assert shown == items[: len(shown)]
+    assert "===== B =====" in body
+    assert f"{len(items) - len(shown)} more item(s) omitted" in body
+
+
 def test_publishes_in_topic_region(monkeypatch, aws):
     """Verify that the summary is published in the topic's region."""
     topic_region = "us-west-2"

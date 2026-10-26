@@ -26,6 +26,10 @@ The summary includes the following details for each instance:
 - Public IP address (if any) and private IP address
 - IAM instance profile, security groups, and tags
 
+If a summary is larger than the 256 KiB SNS message size limit, items
+at the end of it are omitted and a note says how many were left out.
+The full summary is always written to the Lambda's CloudWatch logs.
+
 ## Building the base Lambda image ##
 
 The base Lambda image can be built with the following command:

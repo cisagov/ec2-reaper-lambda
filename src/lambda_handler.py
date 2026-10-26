@@ -17,6 +17,9 @@ logger = logging.getLogger()
 logger.setLevel(default_log_level)
 
 DEFAULT_MAX_AGE_HOURS = 24
+# SNS rejects larger messages, and topics with email subscriptions cannot
+# raise this limit.
+SNS_MESSAGE_MAX_BYTES = 256 * 1024
 # SNS rejects subjects longer than this.
 SNS_SUBJECT_MAX_LENGTH = 100
 SNS_TOPIC_ARN_PATTERN = re.compile(
@@ -29,6 +32,12 @@ PROTECTED_SKIP_REASON = (
     "instance, so it was not terminated.  Disable termination protection and "
     "terminate the instance manually, or remove it from this account."
 )
+SUMMARY_OMITTED_NOTE = (
+    "===== {count} more item(s) omitted =====\n\n"
+    "This summary was too large for a single SNS message.  The full summary is "
+    "in the Lambda's CloudWatch logs."
+)
+SUMMARY_SECTION_SEPARATOR = "\n\n"
 
 
 class EventValidation(NamedTuple):
@@ -76,6 +85,16 @@ class ReapResults:
     errors: list[str] = field(default_factory=list)
     skipped: list[InstanceRecord] = field(default_factory=list)
     terminated: list[InstanceRecord] = field(default_factory=list)
+
+
+@dataclass
+class Summary:
+    """The summary message of a reaping run."""
+
+    subject: str
+    header: list[str]
+    # Each group is a heading and the items (instances or errors) under it.
+    groups: list[tuple[str, list[str]]] = field(default_factory=list)
 
 
 def utcnow() -> datetime:
@@ -353,8 +372,8 @@ def build_summary(
     max_age_hours: int,
     states: list[str],
     dry_run: bool,
-) -> tuple[str, str]:
-    """Build the subject and body of the summary message."""
+) -> Summary:
+    """Build the summary message."""
     prefix = "[DRY RUN] " if dry_run else ""
     terminated_verb = "would terminate" if dry_run else "terminated"
     subject = (
@@ -363,15 +382,19 @@ def build_summary(
         f"errors {len(results.errors)}"
     )[:SNS_SUBJECT_MAX_LENGTH]
 
-    sections = [
-        f"EC2 Reaper summary for AWS account {account_id}",
-        f"Run time: {format_time(now)}",
-        f"Maximum instance age: {max_age_hours} hours, measured from the root "
-        "volume attach time (launch time if there is no EBS root volume)",
-        f"Instance states considered: {', '.join(states)}",
-    ]
+    summary = Summary(
+        subject=subject,
+        header=[
+            f"EC2 Reaper summary for AWS account {account_id}",
+            f"Run time: {format_time(now)}",
+            f"Maximum instance age: {max_age_hours} hours, measured from the "
+            "root volume attach time (launch time if there is no EBS root "
+            "volume)",
+            f"Instance states considered: {', '.join(states)}",
+        ],
+    )
     if dry_run:
-        sections.append(
+        summary.header.append(
             "DRY RUN: no instances were terminated.  The instances below are the "
             "ones that would have been terminated."
         )
@@ -380,26 +403,71 @@ def build_summary(
         heading = (
             "Instances that would be terminated" if dry_run else "Terminated instances"
         )
-        sections.append(f"===== {heading} ({len(results.terminated)}) =====")
-        sections.extend(
-            format_instance(record, "State before termination")
-            for record in results.terminated
+        summary.groups.append(
+            (
+                f"===== {heading} ({len(results.terminated)}) =====",
+                [
+                    format_instance(record, "State before termination")
+                    for record in results.terminated
+                ],
+            )
         )
 
     if results.skipped:
-        sections.append(
-            "===== Instances older than the maximum age that were NOT "
-            f"terminated ({len(results.skipped)}) ====="
-        )
-        sections.extend(
-            format_instance(record, "Current state") for record in results.skipped
+        summary.groups.append(
+            (
+                "===== Instances older than the maximum age that were NOT "
+                f"terminated ({len(results.skipped)}) =====",
+                [
+                    format_instance(record, "Current state")
+                    for record in results.skipped
+                ],
+            )
         )
 
     if results.errors:
-        sections.append(f"===== Errors ({len(results.errors)}) =====")
-        sections.extend(f"  - {error}" for error in results.errors)
+        summary.groups.append(
+            (
+                f"===== Errors ({len(results.errors)}) =====",
+                [f"  - {error}" for error in results.errors],
+            )
+        )
 
-    return subject, "\n\n".join(sections) + "\n"
+    return summary
+
+
+def join_summary(summary: Summary, shown: int, omitted: int) -> str:
+    """Join the header, the headings, and the first shown items of a summary."""
+    sections = list(summary.header)
+    for heading, items in summary.groups:
+        sections.append(heading)
+        sections.extend(items[: max(shown, 0)])
+        shown -= len(items)
+    if omitted:
+        sections.append(SUMMARY_OMITTED_NOTE.format(count=omitted))
+    return SUMMARY_SECTION_SEPARATOR.join(sections) + "\n"
+
+
+def summary_body(summary: Summary, max_bytes: int | None = None) -> str:
+    """Return the body of a summary.
+
+    If the body would be larger than max_bytes when UTF-8 encoded, items are
+    omitted from the end and a note that says how many is appended.
+    """
+    items = [item for _, group_items in summary.groups for item in group_items]
+    body = join_summary(summary, len(items), 0)
+    if max_bytes is None or len(body.encode()) <= max_bytes:
+        return body
+
+    # Leave room for the note, assuming the largest possible count.
+    size = len(join_summary(summary, 0, len(items)).encode())
+    shown = 0
+    for item in items:
+        size += len(SUMMARY_SECTION_SEPARATOR) + len(item.encode())
+        if size > max_bytes:
+            break
+        shown += 1
+    return join_summary(summary, shown, len(items) - shown)
 
 
 def task_reap(event):
@@ -452,12 +520,15 @@ def task_reap(event):
     result["terminated"] = [record.arn for record in results.terminated]
 
     if results.terminated or results.skipped or results.errors:
-        subject, body = build_summary(
+        summary = build_summary(
             results, account_id, now, max_age_hours, states, dry_run
         )
+        logging.info("%s\n\n%s", summary.subject, summary_body(summary))
         try:
             session.client("sns", region_name=sns_topic_region).publish(
-                Message=body, Subject=subject, TopicArn=sns_topic_arn
+                Message=summary_body(summary, SNS_MESSAGE_MAX_BYTES),
+                Subject=summary.subject,
+                TopicArn=sns_topic_arn,
             )
         except (BotoCoreError, ClientError) as err:
             error_msg = f"Unable to publish summary to {sns_topic_arn}: {err}"
