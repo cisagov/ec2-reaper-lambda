@@ -94,6 +94,10 @@ def reap(topic_arn, **kwargs):
             "must be an SNS topic ARN",
         ),
         (
+            {"sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:reaper\n"},
+            "must be an SNS topic ARN",
+        ),
+        (
             {"sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:reaper.fifo"},
             "must not be a FIFO topic",
         ),

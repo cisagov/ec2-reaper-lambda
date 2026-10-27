@@ -22,9 +22,10 @@ DEFAULT_MAX_AGE_HOURS = 24
 SNS_MESSAGE_MAX_BYTES = 256 * 1024
 # SNS rejects subjects longer than this.
 SNS_SUBJECT_MAX_LENGTH = 100
+# Use fullmatch(), since $ also matches before a trailing newline.
 SNS_TOPIC_ARN_PATTERN = re.compile(
-    r"^arn:(?P<partition>aws[a-z-]*):sns:(?P<region>[a-z]{2}-[a-z-]+-\d+)"
-    r":(?P<account>\d{12}):(?P<topic>[A-Za-z0-9_-]{1,256})$"
+    r"arn:(?P<partition>aws[a-z-]*):sns:(?P<region>[a-z]{2}-[a-z-]+-\d+)"
+    r":(?P<account>\d{12}):(?P<topic>[A-Za-z0-9_-]{1,256})"
 )
 
 PROTECTED_SKIP_REASON = (
@@ -127,7 +128,7 @@ def validate_event_data(event: dict[str, Any]) -> EventValidation:
 
     sns_topic_arn = event.get("sns_topic_arn")
     topic_match = (
-        SNS_TOPIC_ARN_PATTERN.match(sns_topic_arn)
+        SNS_TOPIC_ARN_PATTERN.fullmatch(sns_topic_arn)
         if isinstance(sns_topic_arn, str)
         else None
     )
