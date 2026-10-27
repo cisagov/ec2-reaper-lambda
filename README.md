@@ -106,7 +106,7 @@ pipenv lock
 | ---- | ----------- | ---- | ------- | :------: |
 | dry\_run | Whether to report the instances that would be terminated without terminating them.  A dry run still publishes a summary and uses the `DryRun` option of the EC2 `TerminateInstances` API to verify that each termination would be permitted. | `bool` | `false` | no |
 | max\_age\_hours | A strictly positive integer denoting the number of hours after which an instance is terminated. | `number` | `24` | no |
-| sns\_topic\_arn | The ARN of the SNS topic to which summaries are published. | `string` | n/a | yes |
+| sns\_topic\_arn | The ARN of the SNS topic to which summaries are published.  FIFO topics are not supported, since they cannot deliver email. | `string` | n/a | yes |
 | task | The task to perform.  Must be `reap`. | `string` | n/a | yes |
 | terminate\_stopped | Whether to also terminate stopped (and stopping) instances.  By default only running instances are terminated. | `bool` | `false` | no |
 

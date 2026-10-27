@@ -24,7 +24,7 @@ SNS_MESSAGE_MAX_BYTES = 256 * 1024
 SNS_SUBJECT_MAX_LENGTH = 100
 SNS_TOPIC_ARN_PATTERN = re.compile(
     r"^arn:(?P<partition>aws[a-z-]*):sns:(?P<region>[a-z]{2}-[a-z-]+-\d+)"
-    r":(?P<account>\d{12}):(?P<topic>[A-Za-z0-9_-]{1,256}(\.fifo)?)$"
+    r":(?P<account>\d{12}):(?P<topic>[A-Za-z0-9_-]{1,256})$"
 )
 
 PROTECTED_SKIP_REASON = (
@@ -133,6 +133,9 @@ def validate_event_data(event: dict[str, Any]) -> EventValidation:
     )
     if not sns_topic_arn:
         errors.append('Missing required key "sns_topic_arn" in event.')
+    # SNS FIFO topics cannot deliver to email subscriptions.
+    elif isinstance(sns_topic_arn, str) and sns_topic_arn.endswith(".fifo"):
+        errors.append('"sns_topic_arn" must not be a FIFO topic.')
     elif topic_match is None:
         errors.append(
             '"sns_topic_arn" must be an SNS topic ARN (e.g. '
