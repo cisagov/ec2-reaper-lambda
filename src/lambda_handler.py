@@ -21,6 +21,9 @@ DEFAULT_MAX_AGE_HOURS = 24
 # SNS rejects larger messages, and topics with email subscriptions cannot
 # raise this limit.
 SNS_MESSAGE_MAX_BYTES = 256 * 1024
+# AWS includes this in the message of an error caused by a service control
+# policy.
+SCP_DENIAL_MESSAGE = "with an explicit deny in a service control policy"
 # SNS rejects subjects longer than this.
 SNS_SUBJECT_MAX_LENGTH = 100
 # Use fullmatch(), since $ also matches before a trailing newline.
@@ -93,6 +96,7 @@ class ReapResults:
     """The outcome of a reaping run."""
 
     errors: list[str] = field(default_factory=list)
+    scp_denied_regions: list[str] = field(default_factory=list)
     skipped: list[InstanceRecord] = field(default_factory=list)
     terminated: list[InstanceRecord] = field(default_factory=list)
 
@@ -259,6 +263,17 @@ def terminate_instance(ec2, record: InstanceRecord, dry_run: bool) -> None:
     ec2.terminate_instances(InstanceIds=[record.instance_id])
 
 
+def is_scp_denial(err: BotoCoreError | ClientError) -> bool:
+    """Return whether an error was caused by a service control policy."""
+    if not isinstance(err, ClientError):
+        return False
+    error = err.response.get("Error", {})
+    # A denial by the Lambda's own IAM policy has the same error code but a
+    # different message, and must still be reported as an error.
+    unauthorized = error.get("Code") == "UnauthorizedOperation"
+    return unauthorized and SCP_DENIAL_MESSAGE in error.get("Message", "")
+
+
 def reap_region(
     session: boto3.session.Session,
     region: str,
@@ -290,6 +305,15 @@ def reap_region(
                             "Instance %s is too young to reap.", record.instance_id
                         )
     except (BotoCoreError, ClientError) as err:
+        if is_scp_denial(err):
+            logging.warning(
+                "Skipping region %s because a service control policy denies "
+                "access to it: %s",
+                region,
+                err,
+            )
+            results.scp_denied_regions.append(region)
+            return
         error_msg = f"{region}: Unable to list EC2 instances: {err}"
         logging.error(error_msg)
         results.errors.append(error_msg)
@@ -395,6 +419,11 @@ def build_summary(
             f"Instance states considered: {', '.join(states)}",
         ],
     )
+    if results.scp_denied_regions:
+        summary.header.append(
+            "Regions skipped because a service control policy denies access to "
+            f"them: {', '.join(results.scp_denied_regions)}"
+        )
     if dry_run:
         summary.header.append(
             "DRY RUN: no instances were terminated.  The instances below are the "
@@ -523,6 +552,7 @@ def task_reap(event):
 
     result["dry_run"] = dry_run
     result["errors"] = results.errors
+    result["scp_denied_regions"] = results.scp_denied_regions
     result["skipped"] = [record.arn for record in results.skipped]
     result["terminated"] = [record.arn for record in results.terminated]
 
@@ -557,6 +587,12 @@ def task_reap(event):
         f"{len(results.terminated)} instance(s) and skipped "
         f"{len(results.skipped)} protected instance(s)."
     )
+    if results.scp_denied_regions:
+        result["message"] += (
+            f"  Skipped {len(results.scp_denied_regions)} region(s) because a "
+            "service control policy denies access to them: "
+            f"{', '.join(results.scp_denied_regions)}."
+        )
     logging.info(result["message"])
     return result
 

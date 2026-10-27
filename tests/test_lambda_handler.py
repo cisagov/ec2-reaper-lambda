@@ -68,6 +68,37 @@ def state_of(instance_id, region=REGION):
     return instance["State"]["Name"]
 
 
+def deny_describe_instances(monkeypatch, region, reason):
+    """Make DescribeInstances fail in a region as it would if access were denied."""
+    original_client = boto3.session.Session.client
+    message = (
+        "You are not authorized to perform this operation. User: "
+        "arn:aws:sts::123456789012:assumed-role/EC2ReaperLambda/ec2-reaper is not "
+        f"authorized to perform: ec2:DescribeInstances {reason}"
+    )
+
+    def deny(**kwargs):
+        raise ClientError(
+            {"Error": {"Code": "UnauthorizedOperation", "Message": message}},
+            "DescribeInstances",
+        )
+
+    def client(self, service_name, *args, **kwargs):
+        new_client = original_client(self, service_name, *args, **kwargs)
+        if service_name == "ec2" and new_client.meta.region_name == region:
+            new_client.meta.events.register("before-call.ec2.DescribeInstances", deny)
+        return new_client
+
+    monkeypatch.setattr(boto3.session.Session, "client", client)
+
+
+SCP_DENIAL = (
+    "with an explicit deny in a service control policy: "
+    "arn:aws:organizations::123456789012:policy/o-example/"
+    "service_control_policy/p-example"
+)
+
+
 def reap(topic_arn, **kwargs):
     """Invoke the handler with the reap task."""
     return lambda_handler.handler(
@@ -276,6 +307,61 @@ def test_termination_error_is_reported(monkeypatch, topic_arn):
     [(subject, body)] = sent_messages(topic_arn)
     assert "errors 1" in subject
     assert "Unable to terminate instance" in body
+
+
+def test_skips_region_denied_by_scp(monkeypatch, topic_arn):
+    """Verify that a region denied by an SCP is skipped and reported."""
+    instance_id = launch()
+    other_region_id = launch(region="us-west-2")
+    advance_clock(monkeypatch, 25)
+    deny_describe_instances(monkeypatch, "us-west-2", SCP_DENIAL)
+    result = reap(topic_arn)
+
+    assert result["success"] is True
+    assert result["errors"] == []
+    assert result["scp_denied_regions"] == ["us-west-2"]
+    assert "service control policy denies access to them: us-west-2." in (
+        result["message"]
+    )
+    assert state_of(instance_id) in ("shutting-down", "terminated")
+    # state_of() can't be used in the denied region, but only instances that
+    # were listed can have been terminated.
+    [terminated_arn] = result["terminated"]
+    assert terminated_arn.endswith(f"/{instance_id}")
+    assert other_region_id not in terminated_arn
+    [(subject, body)] = sent_messages(topic_arn)
+    assert "errors 0" in subject
+    assert (
+        "Regions skipped because a service control policy denies access to "
+        "them: us-west-2"
+    ) in body
+
+
+def test_scp_denied_region_alone_sends_no_summary(monkeypatch, topic_arn):
+    """Verify that SCP-denied regions alone do not trigger a summary."""
+    advance_clock(monkeypatch, 25)
+    deny_describe_instances(monkeypatch, "us-west-2", SCP_DENIAL)
+    result = reap(topic_arn)
+
+    assert result["success"] is True
+    assert result["scp_denied_regions"] == ["us-west-2"]
+    assert sent_messages(topic_arn) == []
+
+
+def test_iam_denial_is_an_error(monkeypatch, topic_arn):
+    """Verify that a region denied by the Lambda's own policy is an error."""
+    advance_clock(monkeypatch, 25)
+    deny_describe_instances(
+        monkeypatch,
+        "us-west-2",
+        "because no identity-based policy allows the ec2:DescribeInstances action",
+    )
+    with pytest.raises(lambda_handler.ReapError, match="us-west-2: Unable to list"):
+        reap(topic_arn)
+
+    [(subject, body)] = sent_messages(topic_arn)
+    assert "errors 1" in subject
+    assert "Regions skipped" not in body
 
 
 def test_publish_failure(monkeypatch, aws):

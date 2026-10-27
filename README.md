@@ -16,6 +16,13 @@ and started.  If an instance has no EBS root volume, its launch time is
 used instead.  Instances with termination protection enabled are never
 terminated; they are listed in every summary until they are dealt with.
 
+Regions where a service control policy (SCP) denies access to EC2 are
+skipped rather than reported as errors.  They are listed in the
+summary, the Lambda's response (`scp_denied_regions`), and its logs.
+Regions skipped this way do not cause a summary to be sent on their
+own.  A denial from any other source, such as the Lambda's own IAM
+policy, is still reported as an error.
+
 The summary includes the following details for each instance:
 
 - Instance ARN, `Name` tag, region, and availability zone
