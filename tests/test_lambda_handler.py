@@ -301,7 +301,9 @@ def test_oversized_summary(monkeypatch, topic_arn, caplog):
     assert len(body.encode()) <= max_bytes
     assert body.count("Instance ARN:") < 3
     assert "more item(s) omitted" in body
-    assert caplog.text.count("Instance ARN:") == 3
+    # Each instance is logged in full, in its own log record.
+    logged = [r for r in caplog.records if "Instance ARN:" in r.getMessage()]
+    assert len(logged) == 3
 
 
 def test_summary_body_omits_trailing_items():

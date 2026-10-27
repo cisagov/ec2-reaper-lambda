@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 import os
 import re
+import sys
 from typing import Any, NamedTuple
 
 # Third-Party Libraries
@@ -437,8 +438,10 @@ def build_summary(
     return summary
 
 
-def join_summary(summary: Summary, shown: int, omitted: int) -> str:
-    """Join the header, the headings, and the first shown items of a summary."""
+def summary_sections(
+    summary: Summary, shown: int = sys.maxsize, omitted: int = 0
+) -> list[str]:
+    """Return the header, the headings, and the first shown items of a summary."""
     sections = list(summary.header)
     for heading, items in summary.groups:
         sections.append(heading)
@@ -446,6 +449,12 @@ def join_summary(summary: Summary, shown: int, omitted: int) -> str:
         shown -= len(items)
     if omitted:
         sections.append(SUMMARY_OMITTED_NOTE.format(count=omitted))
+    return sections
+
+
+def join_summary(summary: Summary, shown: int, omitted: int) -> str:
+    """Join the header, the headings, and the first shown items of a summary."""
+    sections = summary_sections(summary, shown, omitted)
     return SUMMARY_SECTION_SEPARATOR.join(sections) + "\n"
 
 
@@ -521,7 +530,11 @@ def task_reap(event):
         summary = build_summary(
             results, account_id, now, max_age_hours, states, dry_run
         )
-        logging.info("%s\n\n%s", summary.subject, summary_body(summary))
+        # Log each section separately to keep log events within CloudWatch's
+        # size limit.
+        logging.info(summary.subject)
+        for section in summary_sections(summary):
+            logging.info(section)
         try:
             session.client("sns", region_name=sns_topic_region).publish(
                 Message=summary_body(summary, SNS_MESSAGE_MAX_BYTES),
